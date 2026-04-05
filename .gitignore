@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# PyTorch / Model weights
+*.pt
+*.pth
+*.ckpt
+*.bin
+
+# Data (download separately)
+data/
+*.h5
+*.hdf5
+*.zip
+*.tar.gz
+
+# Outputs (generated at runtime)
+outputs/*
+!outputs/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+wandb/
