@@ -37,7 +37,7 @@ Single-View_Prediction/
 |
 |-- src/                          Core library
 |   |-- config.py                 Default settings (model, paths, camera params, RANSAC)
-|   |-- dataloader.py             NYU Depth V2 HDF5 dataset loader
+|   |-- dataloader.py             NYU Depth V2 folder-based dataset loader
 |   |-- depth_estimator.py        Depth Anything V2 inference wrapper
 |   |-- aligner.py                Sparse anchor sampling + RANSAC alignment
 |   |-- projector.py              Pinhole back-projection and .ply export
@@ -48,6 +48,13 @@ Single-View_Prediction/
 |   |-- run_pipeline.py           Full end-to-end pipeline on a single image
 |   |-- evaluate.py               Batch evaluation over multiple images
 |   |-- sparsity_analysis.py      RMSE vs number of anchors sweep
+|
+|-- nyu_data/                     Dataset (downloaded separately)
+|   |-- data/
+|       |-- nyu2_train.csv        CSV manifest for training split
+|       |-- nyu2_test.csv         CSV manifest for test split
+|       |-- nyu2_train/           RGB + depth PNG pairs
+|       |-- nyu2_test/            RGB + depth PNG pairs
 |
 |-- outputs/                      Generated results (gitignored)
 |-- requirements.txt
@@ -62,7 +69,7 @@ Single-View_Prediction/
 All default hyperparameters live in a single dictionary here -- model name, dataset path, NYU camera intrinsics (fx, fy, cx, cy), RANSAC settings (iterations, threshold, min samples), and output paths. Change this file first if you want to modify any defaults.
 
 ### `src/dataloader.py`
-Defines `NYUDepthV2Dataset`, a PyTorch Dataset that reads from the Kaggle HDF5 file. Each sample returns an RGB image tensor, a ground truth depth map in meters, and the 3x3 intrinsic matrix K. A `get_sample()` convenience function is also included for quick NumPy access.
+Defines `NYUDepthV2Dataset`, a PyTorch Dataset that reads from the folder-based Kaggle download using CSV manifests (`nyu2_train.csv` / `nyu2_test.csv`). Each CSV line contains `image_path,depth_path` pointing to PNG files. Each sample returns an RGB image tensor, a ground truth depth map in meters, and the 3×3 intrinsic matrix K. A `get_sample()` convenience function is also included for quick NumPy access.
 
 ### `src/depth_estimator.py`
 `DepthEstimator` loads Depth Anything V2 Large from HuggingFace Transformers and runs inference. Accepts PIL images, NumPy arrays, or PyTorch tensors. Returns a (H, W) relative depth map upsampled to the original image resolution.
@@ -123,10 +130,24 @@ pip install -r requirements.txt
 
 **2. Download the dataset**
 
-Download the NYU Depth V2 HDF5 file from Kaggle:
+Download the NYU Depth V2 dataset from Kaggle:
 https://www.kaggle.com/datasets/soumikrakshit/nyu-depth-v2
 
-Place it at `data/nyu_depth_v2.h5` inside the project root, or pass a custom path using the `--data` flag in any script.
+Unzip the archive into the project root so the dataset is at `nyu_data/`:
+
+```bash
+unzip archive.zip
+```
+
+This creates the following structure:
+```
+nyu_data/data/nyu2_train.csv
+nyu_data/data/nyu2_test.csv
+nyu_data/data/nyu2_train/   (image + depth PNG pairs)
+nyu_data/data/nyu2_test/    (image + depth PNG pairs)
+```
+
+You can also pass a custom dataset path using the `--data` flag in any script.
 
 ---
 
@@ -140,7 +161,7 @@ python scripts/run_pipeline.py --index 0 --anchors 100
 ```
 Runs depth estimation, alignment, and 3D projection on one image. Saves the point cloud (`.ply`), comparison plots, and error maps to `outputs/`. Prints evaluation metrics to the terminal.
 
-Flags: `--index` (image number), `--anchors` (number of GT points), `--device cpu` (if no GPU), `--no-viz` (skip plots).
+Flags: `--index` (image number), `--anchors` (number of GT points), `--data` (dataset folder path), `--device cpu` (if no GPU), `--no-viz` (skip plots).
 
 **Batch evaluation:**
 ```bash
