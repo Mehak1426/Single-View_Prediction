@@ -31,8 +31,8 @@ def parse_args():
                         help="Number of images to evaluate (default: 50)")
     parser.add_argument("--anchors", type=int, default=CONFIG["num_anchors"],
                         help="Sparse anchors per image")
-    parser.add_argument("--data", type=str, default=CONFIG["data_path"],
-                        help="Path to HDF5 file")
+    parser.add_argument("--data", type=str, default=CONFIG["data_dir"],
+                        help="Path to the NYU Depth V2 dataset folder")
     parser.add_argument("--device", type=str, default=CONFIG["device"])
     parser.add_argument("--output", type=str, default=CONFIG["output_dir"])
     return parser.parse_args()
@@ -43,7 +43,7 @@ def main():
     os.makedirs(args.output, exist_ok=True)
 
     # load dataset & model
-    dataset = NYUDepthV2Dataset(h5_path=args.data)
+    dataset = NYUDepthV2Dataset(data_dir=args.data)
     estimator = DepthEstimator(device=args.device)
     sampler = SparseAnchorSampler(num_anchors=args.anchors)
     aligner = RANSACAligner()

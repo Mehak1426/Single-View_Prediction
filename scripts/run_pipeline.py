@@ -37,8 +37,8 @@ def parse_args():
                         help="Image index in the dataset (default: 0)")
     parser.add_argument("--anchors", type=int, default=CONFIG["num_anchors"],
                         help=f"Number of sparse anchors (default: {CONFIG['num_anchors']})")
-    parser.add_argument("--data", type=str, default=CONFIG["data_path"],
-                        help="Path to the NYU Depth V2 .h5 file")
+    parser.add_argument("--data", type=str, default=CONFIG["data_dir"],
+                        help="Path to the NYU Depth V2 dataset folder")
     parser.add_argument("--output", type=str, default=CONFIG["output_dir"],
                         help="Output directory")
     parser.add_argument("--device", type=str, default=CONFIG["device"],
@@ -54,7 +54,7 @@ def main():
 
     # ── Step 1: Load Data ──────────────────────────────────
     print("\n[Pipeline] Step 1/5 — Loading data ...")
-    rgb_np, depth_gt, K = get_sample(idx=args.index, h5_path=args.data)
+    rgb_np, depth_gt, K = get_sample(idx=args.index, data_dir=args.data)
     print(f"  Image shape : {rgb_np.shape}")
     print(f"  Depth range : [{depth_gt.min():.2f}, {depth_gt.max():.2f}] m")
 

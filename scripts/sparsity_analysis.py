@@ -32,7 +32,8 @@ def parse_args():
                         help="Number of images to average over (default: 20)")
     parser.add_argument("--trials", type=int, default=CONFIG["sparsity_trials"],
                         help="Random trials per N value (default: 5)")
-    parser.add_argument("--data", type=str, default=CONFIG["data_path"])
+    parser.add_argument("--data", type=str, default=CONFIG["data_dir"],
+                        help="Path to the NYU Depth V2 dataset folder")
     parser.add_argument("--device", type=str, default=CONFIG["device"])
     parser.add_argument("--output", type=str, default=CONFIG["output_dir"])
     return parser.parse_args()
@@ -42,7 +43,7 @@ def main():
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
 
-    dataset = NYUDepthV2Dataset(h5_path=args.data)
+    dataset = NYUDepthV2Dataset(data_dir=args.data)
     estimator = DepthEstimator(device=args.device)
     aligner = RANSACAligner()
 

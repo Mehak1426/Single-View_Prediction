@@ -9,7 +9,7 @@ CONFIG = {
     "device": "cuda",            # "cuda" or "cpu"
 
     # ── Dataset ────────────────────────────────────────────
-    "data_path": "data/nyu_depth_v2.h5",   # path to the HDF5 file
+    "data_dir": "nyu_data",                  # path to the dataset folder
     "image_height": 480,
     "image_width": 640,
 
