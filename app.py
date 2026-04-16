@@ -63,7 +63,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 # --- CONFIGURATION ---
-DATA_ROOT = Path("test_output")
+DATA_ROOT = Path("test_outputs")
  
 # 5 scene indices to showcase — change these to any folders that exist in your test_output/
 SHOWCASE_IDXS = ["idx_0", "idx_1239", "idx_1602", "idx_17049", "idx_18627"]
@@ -150,7 +150,7 @@ def make_3d_figure(points: np.ndarray) -> go.Figure:
  
  
 # ── HEADER ───────────────────────────────────────────────────────────────────
-st.title("🧊 Depth Prediction Showcase")
+st.title(" Depth Prediction Showcase")
 st.markdown("Visualising high-fidelity depth estimation and 3D point-cloud reconstruction results.")
  
 # ── GLOBAL METRICS (root-level files) ────────────────────────────────────────
@@ -159,7 +159,7 @@ root_sparsity = DATA_ROOT / "sparsity_data.txt"
 root_sparsity_img = DATA_ROOT / "sparsity_sensitivity.png"
  
 if root_eval.exists() or root_sparsity.exists() or root_sparsity_img.exists():
-    with st.expander("📊 Global Evaluation & Sparsity Summary", expanded=True):
+    with st.expander(" Global Evaluation & Sparsity Summary", expanded=True):
         g1, g2 = st.columns(2)
         with g1:
             if root_eval.exists():
@@ -246,7 +246,7 @@ if rendered == 0:
     st.error("No matching scene folders found. Check that SHOWCASE_IDXS matches your folder names.")
  
 # ── SIDEBAR ──────────────────────────────────────────────────────────────────
-st.sidebar.title("ℹ️ Dashboard")
+st.sidebar.title("ℹ Dashboard")
 st.sidebar.markdown(
     "This gallery showcases **5 curated scenes** from the depth prediction model's test run.\n\n"
     "Each card shows:\n"
