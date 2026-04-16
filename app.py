@@ -1,7 +1,6 @@
 import os
 import re
 from pathlib import Path
-
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
@@ -11,323 +10,157 @@ try:
 except Exception:
     o3d = None
 
+# --- CONFIG & STYLING ---
+st.set_page_config(page_title="Single-View Prediction Showcase", layout="wide")
 
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-TEXT_EXTS = {".txt", ".md", ".log", ".json", ".yaml", ".yml", ".csv"}
-POINT_CLOUD_EXTS = {".ply", ".pcd", ".xyz", ".xyzn", ".xyzrgb"}
-IDX_RE = re.compile(r"(?:^|[_-])idx(?P<idx>\d+)(?:[_-]|\.|$)", re.IGNORECASE)
+# Custom CSS for a professional "Card" look
+st.markdown("""
+<style>
+    .idx-card {
+        padding: 1.5rem;
+        border-radius: 12px;
+        border: 1px solid rgba(255,255,255,0.1);
+        background: rgba(255,255,255,0.05);
+        margin-bottom: 2rem;
+    }
+    .idx-header {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #00d4ff;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid #444;
+    }
+    .metric-box {
+        background: rgba(0,0,0,0.3);
+        padding: 10px;
+        border-radius: 8px;
+        font-family: monospace;
+        font-size: 0.85rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+POINT_CLOUD_EXTS = {".ply", ".pcd"}
+IDX_RE = re.compile(r"idx(?P<idx>\d+)", re.IGNORECASE)
 
-def _safe_relpath(p: Path, root: Path) -> str:
-    try:
-        return str(p.relative_to(root)).replace("\\", "/")
-    except Exception:
-        return p.name
+# --- HELPER FUNCTIONS ---
+def get_files_for_idx(root_dir: Path, target_idx: str):
+    """Finds all specific components for a given index."""
+    found = {"images": [], "clouds": [], "text": []}
+    # Search specifically in folders named like idx_314 or for files containing idx314
+    for p in root_dir.rglob(f"*idx{target_idx}*"):
+        if p.is_file():
+            ext = p.suffix.lower()
+            if ext in IMAGE_EXTS: found["images"].append(p)
+            elif ext in POINT_CLOUD_EXTS: found["clouds"].append(p)
+            elif ext in {".txt", ".json"}: found["text"].append(p)
+    return found
 
-
-@st.cache_data(show_spinner=False)
-def discover_outputs(root_dir_str: str) -> dict:
-    root_dir = Path(root_dir_str)
-    files = [p for p in root_dir.rglob("*") if p.is_file()]
-    files.sort(key=lambda p: (_safe_relpath(p, root_dir).lower()))
-
-    by_idx: dict[str, list[Path]] = {}
-    ungrouped: list[Path] = []
-    for p in files:
-        m = IDX_RE.search(p.name)
-        if m:
-            idx = m.group("idx")
-            by_idx.setdefault(idx, []).append(p)
-        else:
-            ungrouped.append(p)
-
-    return {"by_idx": by_idx, "ungrouped": ungrouped, "all": files}
-
-
-def show_text_file(p: Path) -> None:
-    try:
-        content = p.read_text(encoding="utf-8", errors="replace")
-    except Exception as e:
-        st.error(f"Failed to read {p.name}: {e}")
-        return
-
-    if p.suffix.lower() == ".md":
-        st.markdown(content)
-    else:
-        st.text(content)
-
-
-def show_point_cloud(p: Path, max_points: int = 200_000) -> None:
-    if o3d is None:
-        st.warning("open3d isn't available in this environment, so point clouds can't be previewed.")
-        return
-
+def show_mini_pc(p: Path):
+    """Renders a lightweight 3D preview."""
+    if o3d is None: return st.warning("Open3D not available.")
     try:
         pcd = o3d.io.read_point_cloud(str(p))
+        pts = np.asarray(pcd.points)
+        # Downsample for performance in grid view
+        if len(pts) > 50000:
+            pts = pts[np.random.choice(len(pts), 50000, replace=False)]
+        
+        fig = go.Figure(data=[go.Scatter3d(
+            x=pts[:,0], y=pts[:,1], z=pts[:,2],
+            mode='markers',
+            marker=dict(size=1, color=pts[:,2], colorscale='Viridis', opacity=0.8)
+        )])
+        fig.update_layout(
+            scene=dict(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False),
+            margin=dict(l=0,r=0,b=0,t=0), height=350, paper_bgcolor="rgba(0,0,0,0)"
+        )
+        st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
-        st.error(f"Failed to load point cloud {p.name}: {e}")
-        return
+        st.error(f"3D Error: {e}")
 
-    pts = np.asarray(pcd.points)
-    if pts.size == 0:
-        st.info("Point cloud has 0 points.")
-        return
+# --- MAIN UI ---
+st.title("🔬 Prediction Showcase Gallery")
+st.markdown("Select specific indices from the sidebar to compare model outputs and metrics.")
 
-    if len(pts) > max_points:
-        pts = pts[:max_points]
-        colors = np.asarray(pcd.colors)
-        if colors.shape[0] == len(np.asarray(pcd.points)):
-            colors = colors[:max_points]
-        else:
-            colors = np.empty((len(pts), 0))
-    else:
-        colors = np.asarray(pcd.colors)
-
-    has_rgb = colors.ndim == 2 and colors.shape[1] == 3 and colors.shape[0] == len(pts)
-    if has_rgb:
-        color = colors
-    else:
-        # Fallback: color by depth (z)
-        z = pts[:, 2]
-        z = (z - z.min()) / (z.ptp() + 1e-9)
-        color = z
-
-    fig = go.Figure(
-        data=[
-            go.Scatter3d(
-                x=pts[:, 0],
-                y=pts[:, 1],
-                z=pts[:, 2],
-                mode="markers",
-                marker=dict(size=1.5, color=color, opacity=1),
-            )
-        ]
-    )
-    fig.update_layout(
-        scene=dict(
-            xaxis_visible=False,
-            yaxis_visible=False,
-            zaxis_visible=False,
-            bgcolor="black",
-            aspectmode="data",
-        ),
-        paper_bgcolor="black",
-        margin=dict(l=0, r=0, b=0, t=0),
-        height=800,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-st.set_page_config(page_title="Test Outputs Showcase", layout="wide")
-
-st.markdown(
-    """
-<style>
-  .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
-  .sv-card {
-    padding: 0.9rem 1rem;
-    border: 1px solid rgba(120,120,120,0.25);
-    border-radius: 16px;
-    background: rgba(255,255,255,0.03);
-  }
-  .sv-muted { opacity: 0.75; }
-  .sv-title { font-size: 2.0rem; font-weight: 750; margin: 0.1rem 0 0.2rem 0; }
-  .sv-subtitle { font-size: 1rem; margin: 0 0 0.6rem 0; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    """
-<div class="sv-card">
-  <div class="sv-title">Test Outputs Showcase</div>
-  <div class="sv-subtitle sv-muted">Browse depth-map images, metrics, and point clouds directly from your <code>test_outputs</code> folder.</div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
+# Sidebar Controls
 default_root = Path("test_outputs")
 with st.sidebar:
-    st.header("Controls")
-    root = st.text_input("Outputs folder", value=str(default_root))
-    root_dir = Path(root)
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        if st.button("Refresh", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-    with c2:
-        auto_refresh = st.toggle("Auto-refresh", value=False, help="Refresh the page every few seconds.")
+    st.header("Settings")
+    root_input = st.text_input("Data Root", value=str(default_root))
+    root_dir = Path(root_input)
+    
+    if root_dir.exists():
+        # Auto-discover all available IDX values
+        all_files = list(root_dir.rglob("*"))
+        all_idxs = sorted(list(set(IDX_RE.findall(" ".join([p.name for p in all_files])))), key=int)
+        
+        selected_idxs = st.multiselect(
+            "Select Indices to Showcase", 
+            options=all_idxs, 
+            default=all_idxs[:3] if len(all_idxs) >= 3 else all_idxs
+        )
+        
+        st.divider()
+        render_3d = st.checkbox("Enable 3D Previews", value=False)
+        img_mode = st.radio("Primary Image", ["comparison", "error_map", "sparsity"])
+    else:
+        st.error("Path not found.")
+        st.stop()
 
-    if auto_refresh:
-        st.caption("Auto-refresh is on.")
-        st.autorefresh(interval=5000, key="sv_autorefresh")
-
-if not root_dir.exists():
-    st.error(f"Folder not found: {root_dir}")
-    st.stop()
-
-discovered = discover_outputs(str(root_dir))
-
-all_files: list[Path] = discovered["all"]
-images_all = sum(1 for p in all_files if p.suffix.lower() in IMAGE_EXTS)
-texts_all = sum(1 for p in all_files if p.suffix.lower() in TEXT_EXTS)
-clouds_all = sum(1 for p in all_files if p.suffix.lower() in POINT_CLOUD_EXTS)
-others_all = len(all_files) - images_all - texts_all - clouds_all
-
-stat1, stat2, stat3, stat4 = st.columns(4)
-stat1.metric("Files", len(all_files))
-stat2.metric("Images", images_all)
-stat3.metric("Text", texts_all)
-stat4.metric("Point clouds", clouds_all)
-
-with st.sidebar:
-    st.caption(f"Files found: {len(all_files)}")
-    idxs = sorted(discovered["by_idx"].keys(), key=lambda s: int(s) if s.isdigit() else s)
-
-    group_options = ["(ungrouped)"] + [f"idx{n}" for n in idxs]
-    group_counts = {"(ungrouped)": len(discovered["ungrouped"])}
-    for n in idxs:
-        group_counts[f"idx{n}"] = len(discovered["by_idx"].get(n, []))
-
-    selected_idx = st.selectbox(
-        "Select idx (group)",
-        options=group_options,
-        format_func=lambda g: f"{g}  ({group_counts.get(g, 0)})",
-    )
-
-    search = st.text_input("Search filename", value="", placeholder="e.g. comparison, error_map, eval")
-    sort_mode = st.selectbox("Sort", options=["Name (A→Z)", "Name (Z→A)", "Modified (new→old)", "Modified (old→new)"])
-    img_cols = st.slider("Image grid columns", min_value=2, max_value=6, value=3, step=1)
-
-if selected_idx == "(ungrouped)":
-    group_files = discovered["ungrouped"]
-    group_label = "Ungrouped files"
+# --- CONTENT DISPLAY ---
+if not selected_idxs:
+    st.info("Please select at least one index in the sidebar to display results.")
 else:
-    idx = selected_idx.replace("idx", "")
-    group_files = discovered["by_idx"].get(idx, [])
-    group_label = f"Group: {selected_idx}"
+    for idx_val in selected_idxs:
+        data = get_files_for_idx(root_dir, idx_val)
+        
+        # Start Card Container
+        st.markdown(f'<div class="idx-card">', unsafe_allow_html=True)
+        st.markdown(f'<div class="idx-header">Result Set: idx_{idx_val}</div>', unsafe_allow_html=True)
+        
+        col_img, col_metrics, col_3d = st.columns([2, 1, 1.2])
+        
+        # 1. Image Column
+        with col_img:
+            target_img = next((p for p in data["images"] if img_mode in p.name.lower()), None)
+            if target_img:
+                st.image(str(target_img), caption=f"View: {img_mode}", use_container_width=True)
+            else:
+                st.warning(f"No '{img_mode}' image found.")
 
-st.subheader(group_label)
+        # 2. Metrics Column
+        with col_metrics:
+            st.subheader("📊 Metrics")
+            eval_file = next((p for p in data["text"] if "eval" in p.name.lower()), None)
+            if eval_file:
+                content = eval_file.read_text().strip()
+                st.markdown(f'<div class="metric-box">{content}</div>', unsafe_allow_html=True)
+            else:
+                st.caption("No eval_results.txt found.")
+            
+            # Show other files in this group
+            with st.expander("Other Files"):
+                for p in data["images"] + data["text"]:
+                    st.caption(f"📄 {p.name}")
 
-if search.strip():
-    s = search.strip().lower()
-    group_files = [p for p in group_files if s in p.name.lower() or s in _safe_relpath(p, root_dir).lower()]
+        # 3. 3D Column
+        with col_3d:
+            st.subheader("☁️ Point Cloud")
+            cloud_file = next((p for p in data["clouds"]), None)
+            if cloud_file:
+                if render_3d:
+                    show_mini_pc(cloud_file)
+                else:
+                    st.info("3D rendering disabled in sidebar.")
+                    st.download_button(f"Download {cloud_file.name}", cloud_file.read_bytes(), file_name=cloud_file.name)
+            else:
+                st.caption("No .ply file found for this index.")
 
-def _mtime(p: Path) -> float:
-    try:
-        return p.stat().st_mtime
-    except Exception:
-        return 0.0
+        st.markdown('</div>', unsafe_allow_html=True) # End Card
 
-if sort_mode == "Name (A→Z)":
-    group_files = sorted(group_files, key=lambda p: _safe_relpath(p, root_dir).lower())
-elif sort_mode == "Name (Z→A)":
-    group_files = sorted(group_files, key=lambda p: _safe_relpath(p, root_dir).lower(), reverse=True)
-elif sort_mode == "Modified (new→old)":
-    group_files = sorted(group_files, key=_mtime, reverse=True)
-else:
-    group_files = sorted(group_files, key=_mtime)
-
-if not group_files:
-    st.info("No files in this group.")
-else:
-    images = [p for p in group_files if p.suffix.lower() in IMAGE_EXTS]
-    texts = [p for p in group_files if p.suffix.lower() in TEXT_EXTS]
-    clouds = [p for p in group_files if p.suffix.lower() in POINT_CLOUD_EXTS]
-    others = [p for p in group_files if p not in set(images + texts + clouds)]
-
-    tab_names = []
-    if images:
-        tab_names.append(f"Depth maps / images ({len(images)})")
-    if texts:
-        tab_names.append(f"Metrics / text ({len(texts)})")
-    if clouds:
-        tab_names.append(f"Point clouds ({len(clouds)})")
-    if others:
-        tab_names.append(f"Other files ({len(others)})")
-
-    tabs = st.tabs(tab_names if tab_names else ["Files"])
-
-    tab_i = 0
-    if images:
-        with tabs[tab_i]:
-            top = st.columns([1, 1, 2])
-            with top[0]:
-                st.caption("Tip: click an image to zoom in your browser.")
-            with top[1]:
-                per_page = st.selectbox("Images per page", options=[12, 24, 48, 96], index=1)
-            with top[2]:
-                page = st.number_input(
-                    "Page",
-                    min_value=1,
-                    max_value=max(1, (len(images) + per_page - 1) // per_page),
-                    value=1,
-                    step=1,
-                )
-
-            start = (int(page) - 1) * int(per_page)
-            end = min(len(images), start + int(per_page))
-            page_imgs = images[start:end]
-
-            cols = st.columns(int(img_cols))
-            for i, p in enumerate(page_imgs):
-                with cols[i % int(img_cols)]:
-                    st.image(str(p), caption=_safe_relpath(p, root_dir), use_container_width=True)
-                    with st.expander("Details", expanded=False):
-                        st.code(_safe_relpath(p, root_dir))
-                        st.caption(f"Modified: {_mtime(p):.0f}")
-                        st.download_button(
-                            "Download image",
-                            data=p.read_bytes(),
-                            file_name=p.name,
-                            mime="application/octet-stream",
-                            key=f"dl_img_{p}",
-                        )
-        tab_i += 1
-
-    if texts:
-        with tabs[tab_i]:
-            choice = st.selectbox("Open file", options=[_safe_relpath(p, root_dir) for p in texts])
-            chosen = next(p for p in texts if _safe_relpath(p, root_dir) == choice)
-            with st.container(border=True):
-                st.caption(_safe_relpath(chosen, root_dir))
-                show_text_file(chosen)
-            st.download_button(
-                "Download",
-                data=chosen.read_bytes(),
-                file_name=chosen.name,
-                mime="text/plain",
-                key=f"dl_txt_{chosen}",
-            )
-        tab_i += 1
-
-    if clouds:
-        with tabs[tab_i]:
-            choice = st.selectbox("Open point cloud", options=[_safe_relpath(p, root_dir) for p in clouds])
-            chosen = next(p for p in clouds if _safe_relpath(p, root_dir) == choice)
-            max_pts = st.slider("Max points to render", 10_000, 500_000, 200_000, step=10_000)
-            st.caption(_safe_relpath(chosen, root_dir))
-            show_point_cloud(chosen, max_points=int(max_pts))
-            st.download_button(
-                "Download",
-                data=chosen.read_bytes(),
-                file_name=chosen.name,
-                mime="application/octet-stream",
-                key=f"dl_cloud_{chosen}",
-            )
-        tab_i += 1
-
-    if others:
-        with tabs[tab_i]:
-            for p in others:
-                st.write(_safe_relpath(p, root_dir))
-                st.download_button(
-                    "Download",
-                    data=p.read_bytes(),
-                    file_name=p.name,
-                    mime="application/octet-stream",
-                    key=f"dl_other_{p}",
-                )
+st.sidebar.markdown("---")
+if st.sidebar.button("Clear Cache"):
+    st.cache_data.clear()
+    st.rerun()
