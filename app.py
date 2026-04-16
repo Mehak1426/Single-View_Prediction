@@ -63,7 +63,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 # --- CONFIGURATION ---
-DATA_ROOT = Path("test_outputs")
+DATA_ROOT = Path("test_output")
  
 # 5 scene indices to showcase — change these to any folders that exist in your test_output/
 SHOWCASE_IDXS = ["idx_0", "idx_1239", "idx_1602", "idx_17049", "idx_18627"]
