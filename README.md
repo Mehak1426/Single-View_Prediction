@@ -2,6 +2,8 @@
 
 **Metric-Accurate 3D Reconstruction from a Single RGB Image**
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_svg)](https://dac-204.streamlit.app/)
+
 This is a course project that takes a single photograph, predicts its depth using a pretrained monocular model ([Depth Anything V2](https://arxiv.org/abs/2406.09414)), corrects the prediction to real-world metric scale using a small set of known depth points, and projects the result into a 3D point cloud.
 
 ---
@@ -39,7 +41,8 @@ Single-View_Prediction/
 |   |-- config.py                 Default settings (model, paths, camera params, RANSAC)
 |   |-- dataloader.py             NYU Depth V2 folder-based dataset loader
 |   |-- depth_estimator.py        Depth Anything V2 inference wrapper
-|   |-- aligner.py                Sparse anchor sampling + RANSAC alignment
+|   |-- aligner.py                RANSAC alignment logic
+|   |-- edge_aware_sampler.py     Novelty: Geometry-aware sparse anchor sampling
 |   |-- projector.py              Pinhole back-projection and .ply export
 |   |-- visualizer.py             Plotting (depth comparison, error maps, sparsity curves)
 |   |-- metrics.py                Evaluation metrics (AbsRel, RMSE, delta)
@@ -57,7 +60,9 @@ Single-View_Prediction/
 |       |-- nyu2_test/            RGB + depth PNG pairs
 |
 |-- outputs/                      Generated results (gitignored)
-|-- requirements.txt
+|-- app.py                        Streamlit dashboard for visualization
+|-- requirements.txt              Minimal dependencies
+|-- requirements-full.txt         Full dependencies including Streamlit and Plotly
 |-- README.md
 ```
 
@@ -75,8 +80,9 @@ Defines `NYUDepthV2Dataset`, a PyTorch Dataset that reads from the folder-based 
 `DepthEstimator` loads Depth Anything V2 Large from HuggingFace Transformers and runs inference. Accepts PIL images, NumPy arrays, or PyTorch tensors. Returns a (H, W) relative depth map upsampled to the original image resolution.
 
 ### `src/aligner.py`
-Two classes:
+Three classes handling the core geometry:
 - `SparseAnchorSampler` -- randomly picks N valid pixels from the GT depth map (simulating what a LiDAR or SfM system would provide).
+- `EdgeAwareAnchorSampler` -- **[Novel Feature]** computes spatial depth gradients to avoid sampling points near object boundaries. By forcing the sampler to select anchors only on "flat" surfaces, we reduce the likelihood of RANSAC pulling outliers caused by monocular edge-bleeding artifacts.
 - `RANSACAligner` -- fits a linear model (`d_metric = s * d_pred + t`) using RANSAC to reject outlier anchors. The `align()` method applies the recovered scale and shift to the full prediction.
 
 ### `src/projector.py`
@@ -99,6 +105,9 @@ Implements evaluation metrics standard in depth estimation literature:
 - **AbsRel** -- mean of |pred - gt| / gt (lower is better)
 - **RMSE** -- root mean squared error in meters (lower is better)
 - **delta < 1.25** -- fraction of pixels where max(pred/gt, gt/pred) < 1.25 (higher is better)
+
+### `app.py`
+An interactive Streamlit application. It reads `.ply` and `.png` results from the `outputs/` directory and renders brilliant 3D visualisations using `plotly`. Features an intuitive layout showing evaluation metrics, visual depth comparisons, error heatmaps, and manipulable point clouds side-by-side.
 
 ---
 
@@ -125,7 +134,8 @@ python -m venv venv
 source venv/bin/activate        # Linux / Mac
 venv\Scripts\activate           # Windows
 
-pip install -r requirements.txt
+# Install the full suite of dependencies, including Streamlit and Plotly for the dashboard
+pip install -r requirements-full.txt
 ```
 
 **2. Download the dataset**
@@ -174,6 +184,12 @@ Evaluates the full pipeline on 50 images and prints a summary table (mean and st
 python scripts/sparsity_analysis.py --num-images 20
 ```
 Runs the alignment with N = {5, 10, 50, 100, 500} anchors and plots how RMSE changes. Saves the plot to `outputs/sparsity_sensitivity.png`.
+
+**Interactive 3D Dashboard:**
+```bash
+streamlit run app.py
+```
+This will launch a local web app (typically at `http://localhost:8501`). The dashboard enables you to visualize all generated outputs—including Point Clouds, Comparison Plots, and global metrics—perfect for presentations and visually analyzing the difference between standard uniform sampling and the new `EdgeAwareAnchorSampler`.
 
 ---
 

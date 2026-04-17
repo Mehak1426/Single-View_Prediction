@@ -26,6 +26,7 @@ from src.config import CONFIG
 from src.dataloader import NYUDepthV2Dataset, get_sample
 from src.depth_estimator import DepthEstimator
 from src.aligner import SparseAnchorSampler, RANSACAligner
+from src.edge_aware_sampler import EdgeAwareAnchorSampler
 from src.projector import PointCloudProjector
 from src.visualizer import plot_depth_comparison, plot_error_map
 from src.metrics import evaluate, print_metrics
@@ -66,7 +67,7 @@ def main():
 
     # ── Step 3: Sparse Anchor Sampling + RANSAC Alignment ──
     print(f"\n[Pipeline] Step 3/5 — Sampling {args.anchors} anchors & aligning ...")
-    sampler = SparseAnchorSampler(num_anchors=args.anchors)
+    sampler = EdgeAwareAnchorSampler(num_anchors=args.anchors)
     coords, metric_values = sampler.sample(depth_gt)
 
     # get predicted depth at anchor locations

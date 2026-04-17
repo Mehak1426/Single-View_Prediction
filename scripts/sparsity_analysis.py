@@ -22,6 +22,7 @@ from src.config import CONFIG
 from src.dataloader import NYUDepthV2Dataset
 from src.depth_estimator import DepthEstimator
 from src.aligner import SparseAnchorSampler, RANSACAligner
+from src.edge_aware_sampler import EdgeAwareAnchorSampler
 from src.metrics import compute_rmse
 from src.visualizer import plot_sparsity_curve
 
@@ -77,7 +78,7 @@ def main():
             depth_gt = gt_depths[img_idx]
 
             for trial in range(args.trials):
-                sampler = SparseAnchorSampler(num_anchors=n, seed=trial * 1000 + img_idx)
+                sampler = EdgeAwareAnchorSampler(num_anchors=n, seed=trial * 1000 + img_idx)
                 coords, metric_values = sampler.sample(depth_gt)
                 pred_at_anchors = depth_pred[coords[:, 0], coords[:, 1]]
 
