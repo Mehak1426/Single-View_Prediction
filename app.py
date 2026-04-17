@@ -3,10 +3,8 @@ from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
  
-# --- PAGE CONFIG ---
 st.set_page_config(page_title="Depth Prediction Showcase", layout="wide", page_icon="🧊")
- 
-# --- CUSTOM CSS ---
+
 st.markdown("""
 <style>
     .main { background-color: #0d1117; }
@@ -61,11 +59,32 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
  
-# --- CONFIGURATION ---
 DEFAULT_ROOTS = ["test_output", "test_outputs", "outputs"]
  
- 
-# ── PLY PARSER (no open3d needed) ───────────────────────────────────────────
+
+@st.cache_data(show_spinner=False)
+def ply_vertex_count(ply_path_str: str) -> int:
+    """
+    Read only the PLY header to get the vertex count.
+    Works for ASCII and binary PLY. Returns 0 on failure.
+    """
+    try:
+        ply_path = Path(ply_path_str)
+        with open(ply_path, "rb") as f:
+            count = 0
+            while True:
+                line = f.readline()
+                if not line:
+                    break
+                s = line.decode("utf-8", errors="ignore").strip()
+                if s.startswith("element vertex"):
+                    count = int(s.split()[-1])
+                if s == "end_header":
+                    break
+        return int(count)
+    except Exception:
+        return 0
+
 def read_ply_numpy(ply_path: Path) -> tuple[np.ndarray, np.ndarray | None] | None:
     """
     PLY reader returning (points, colors).
@@ -144,21 +163,28 @@ def read_ply_numpy(ply_path: Path) -> tuple[np.ndarray, np.ndarray | None] | Non
         return None
  
  
-def make_3d_figure(points: np.ndarray, colors: np.ndarray | None = None) -> go.Figure:
-    """Downsample and render a 3-D scatter via Plotly."""
-    # Keep it light enough for browsers/Streamlit Cloud.
-    # With true RGB, higher point counts can become heavy.
-    max_pts = 25_000
+def make_3d_figure(
+    points: np.ndarray,
+    colors: np.ndarray | None = None,
+    *,
+    max_pts: int = 25_000,
+    point_size: float = 1.2,
+    opacity: float = 1.0,
+    color_mode: str = "rgb",
+) -> go.Figure:
+    """Downsample and render a 3-D scatter via Plotly (cloud-safe)."""
     if len(points) > max_pts:
-        idx = np.random.choice(len(points), max_pts, replace=False)
+        idx = np.random.choice(len(points), int(max_pts), replace=False)
         points = points[idx]
         if colors is not None and colors.shape[0] >= idx.max() + 1:
             colors = colors[idx]
 
     z = points[:, 2]
 
-    # Prefer true RGB for "real-life" visualization.
-    if colors is not None and colors.shape[0] == points.shape[0] and colors.shape[1] == 3:
+    has_rgb = colors is not None and colors.shape[0] == points.shape[0] and colors.shape[1] == 3
+
+    # Prefer true RGB for "real-life" visualization (when available).
+    if color_mode == "rgb" and has_rgb:
         c = (colors * 255.0).clip(0, 255).astype(np.uint8)
         color = np.array([f"rgb({r},{g},{b})" for r, g, b in c], dtype=object)
         showscale = False
@@ -175,10 +201,10 @@ def make_3d_figure(points: np.ndarray, colors: np.ndarray | None = None) -> go.F
         x=points[:, 0], y=points[:, 1], z=z,
         mode="markers",
         marker=dict(
-            size=1.2,
+            size=float(point_size),
             color=color,
             colorscale=colorscale,
-            opacity=1.0,
+            opacity=float(opacity),
             showscale=showscale,
             colorbar=colorbar,
         ),
@@ -224,8 +250,6 @@ def _find_default_root() -> Path:
             return p
     return Path(DEFAULT_ROOTS[0])
 
-
-# ── HEADER ───────────────────────────────────────────────────────────────────
 st.title(" Depth Prediction Showcase")
 st.markdown("Visualising high-fidelity depth estimation and 3D point-cloud reconstruction results.")
 
@@ -243,13 +267,29 @@ If you see `CSV manifest not found: nyu2_train.csv`, you need to download/setup 
 Then commit/push `test_outputs/` to GitHub so Streamlit Cloud can render it.
 """
     )
- 
-# ── GLOBAL METRICS (root-level files) ────────────────────────────────────────
+
 with st.sidebar:
     st.title("ℹ Dashboard")
     root_dir = st.text_input("Outputs folder", value=str(_find_default_root()))
     DATA_ROOT = Path(root_dir)
     st.caption("Tip: On Streamlit Cloud this must exist in your GitHub repo.")
+    st.divider()
+
+    # Compute a relevant slider max from available PLY files (header-only scan).
+    ply_candidates = list(DATA_ROOT.rglob("*.ply")) if DATA_ROOT.exists() else []
+    if ply_candidates:
+        counts = [ply_vertex_count(str(p)) for p in ply_candidates[:200]]  # cap scan for safety
+        max_available = max([c for c in counts if c > 0], default=30_500)
+    else:
+        max_available = 30_500
+
+    st.subheader("3D viewer")
+    slider_max = int(max(5_000, max_available))
+    slider_default = int(min(25_000, slider_max))
+    cloud_max_pts = st.slider("Max points (render)", 5_000, slider_max, slider_default, step=500)
+    cloud_point_size = st.slider("Point size", 0.3, 3.0, 1.2, step=0.1)
+    cloud_opacity = st.slider("Opacity", 0.1, 1.0, 1.0, step=0.05)
+    cloud_color_mode = st.selectbox("Color mode", options=["rgb", "depth"], index=0)
     st.divider()
 
     scene_folders = _list_scene_folders(DATA_ROOT)
@@ -267,11 +307,11 @@ with st.sidebar:
     else:
         selected = []
 
-    if st.button("🔄 Refresh"):
+    if st.button("Refresh"):
         st.rerun()
 
 if not DATA_ROOT.exists():
-    st.error(f"❌ Directory `{DATA_ROOT}` not found. Commit an outputs folder (e.g. `test_outputs/`) to your repo.")
+    st.error(f"Directory `{DATA_ROOT}` not found. Commit an outputs folder (e.g. `test_outputs/`) to your repo.")
     st.stop()
 
 root_eval = DATA_ROOT / "eval_results.txt"
@@ -295,8 +335,7 @@ if root_eval.exists() or root_sparsity.exists() or root_sparsity_img.exists():
                 st.markdown("**Sparsity Sensitivity Plot**")
                 st.image(str(root_sparsity_img), use_container_width=True)
     st.divider()
- 
-# ── CONTENT ─────────────────────────────────────────────────────────────────
+
 if has_scene_folders:
     if not selected:
         st.warning("No scenes selected.")
@@ -322,7 +361,7 @@ if has_scene_folders:
         eval_txt = folder / "eval_results.txt"
 
         st.markdown(f'<div class="idx-card">', unsafe_allow_html=True)
-        st.markdown(f'<div class="scene-title">📍 Scene — {idx_name}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="scene-title">Scene: {idx_name}</div>', unsafe_allow_html=True)
         st.markdown(
             f'<span class="tag">folder: {_safe_rel(folder, DATA_ROOT)}</span>',
             unsafe_allow_html=True,
@@ -365,8 +404,19 @@ if has_scene_folders:
                     parsed = read_ply_numpy(ply_file)
                 if parsed is not None:
                     pts, cols = parsed
-                    st.caption(f"Points: {len(pts):,} (rendering a downsampled view)")
-                    st.plotly_chart(make_3d_figure(pts, cols), use_container_width=True)
+                    render_n = min(int(cloud_max_pts), int(len(pts)))
+                    st.caption(f"Points: {len(pts):,} total · {render_n:,} rendered")
+                    st.plotly_chart(
+                        make_3d_figure(
+                            pts,
+                            cols,
+                            max_pts=int(cloud_max_pts),
+                            point_size=float(cloud_point_size),
+                            opacity=float(cloud_opacity),
+                            color_mode=str(cloud_color_mode),
+                        ),
+                        use_container_width=True,
+                    )
                 else:
                     st.error("Could not parse the .ply file.")
             else:
@@ -400,7 +450,17 @@ else:
             parsed = read_ply_numpy(chosen)
             if parsed is not None:
                 pts, cols = parsed
-                st.plotly_chart(make_3d_figure(pts, cols), use_container_width=True)
+                st.plotly_chart(
+                    make_3d_figure(
+                        pts,
+                        cols,
+                        max_pts=int(cloud_max_pts),
+                        point_size=float(cloud_point_size),
+                        opacity=float(cloud_opacity),
+                        color_mode=str(cloud_color_mode),
+                    ),
+                    use_container_width=True,
+                )
         else:
             st.info("No .ply files found.")
     with tabs[2]:
