@@ -2,7 +2,7 @@
 
 **Metric-Accurate 3D Reconstruction from a Single RGB Image**
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_svg)](https://dac-204.streamlit.app/)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://dac-204.streamlit.app/)
 
 This is a course project that takes a single photograph, predicts its depth using a pretrained monocular model ([Depth Anything V2](https://arxiv.org/abs/2406.09414)), corrects the prediction to real-world metric scale using a small set of known depth points, and projects the result into a 3D point cloud.
 
