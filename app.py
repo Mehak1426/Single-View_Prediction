@@ -62,15 +62,45 @@ st.markdown("""
 """, unsafe_allow_html=True)
  
 # --- CONFIGURATION ---
-DEFAULT_ROOTS = ["test_outputs", "test_output", "outputs"]
+DEFAULT_ROOTS = ["test_output", "test_outputs", "outputs"]
  
  
 # ── PLY PARSER (no open3d needed) ───────────────────────────────────────────
-def read_ply_numpy(ply_path: Path) -> np.ndarray | None:
+def read_ply_numpy(ply_path: Path) -> tuple[np.ndarray, np.ndarray | None] | None:
     """
-    Pure-Python PLY reader. Returns Nx3 float32 array of (x, y, z).
-    Supports ASCII and binary_little_endian formats.
+    PLY reader returning (points, colors).
+
+    - points: Nx3 float32 array of (x, y, z)
+    - colors: Nx3 float32 array in [0,1] if present, else None
+
+    Uses `plyfile` when available (recommended). Falls back to a minimal parser.
     """
+    # Preferred: robust parser for binary/ascii + mixed property dtypes
+    try:
+        from plyfile import PlyData  # type: ignore
+
+        ply = PlyData.read(str(ply_path))
+        v = ply["vertex"].data
+        if not all(k in v.dtype.names for k in ("x", "y", "z")):
+            st.warning("PLY missing x/y/z vertex fields.")
+            return None
+
+        pts = np.vstack([v["x"], v["y"], v["z"]]).T.astype(np.float32, copy=False)
+
+        colors = None
+        # Common color field names in PLYs
+        if all(k in v.dtype.names for k in ("red", "green", "blue")):
+            rgb = np.vstack([v["red"], v["green"], v["blue"]]).T
+            # handle uint8 or float color conventions
+            if np.issubdtype(rgb.dtype, np.integer):
+                colors = (rgb.astype(np.float32) / 255.0).clip(0, 1)
+            else:
+                colors = rgb.astype(np.float32).clip(0, 1)
+
+        return pts, colors
+    except Exception:
+        pass
+
     try:
         with open(ply_path, "rb") as f:
             # Parse header
@@ -102,34 +132,55 @@ def read_ply_numpy(ply_path: Path) -> np.ndarray | None:
                 for _ in range(n_vertices):
                     vals = f.readline().decode().split()
                     rows.append([float(vals[x_i]), float(vals[y_i]), float(vals[z_i])])
-                return np.array(rows, dtype=np.float32)
+                return np.array(rows, dtype=np.float32), None
             else:
-                # binary_little_endian — assume all float32 (most common)
+                # binary_little_endian — minimal fallback assumes all float32
                 byte_count = n_vertices * n_props * 4
                 raw = f.read(byte_count)
                 data = np.frombuffer(raw, dtype="<f4").reshape(n_vertices, n_props)
-                return data[:, [x_i, y_i, z_i]]
+                return data[:, [x_i, y_i, z_i]].astype(np.float32, copy=False), None
     except Exception as e:
         st.warning(f"PLY parse error: {e}")
         return None
  
  
-def make_3d_figure(points: np.ndarray) -> go.Figure:
-    """Downsample and render a colourised 3-D scatter via Plotly."""
-    if len(points) > 60_000:
-        idx = np.random.choice(len(points), 60_000, replace=False)
+def make_3d_figure(points: np.ndarray, colors: np.ndarray | None = None) -> go.Figure:
+    """Downsample and render a 3-D scatter via Plotly."""
+    # Keep it light enough for browsers/Streamlit Cloud.
+    # With true RGB, higher point counts can become heavy.
+    max_pts = 25_000
+    if len(points) > max_pts:
+        idx = np.random.choice(len(points), max_pts, replace=False)
         points = points[idx]
- 
+        if colors is not None and colors.shape[0] >= idx.max() + 1:
+            colors = colors[idx]
+
     z = points[:, 2]
+
+    # Prefer true RGB for "real-life" visualization.
+    if colors is not None and colors.shape[0] == points.shape[0] and colors.shape[1] == 3:
+        c = (colors * 255.0).clip(0, 255).astype(np.uint8)
+        color = np.array([f"rgb({r},{g},{b})" for r, g, b in c], dtype=object)
+        showscale = False
+        colorscale = None
+        colorbar = None
+    else:
+        # Fallback: color by depth
+        color = z
+        showscale = True
+        colorscale = "Viridis"
+        colorbar = dict(thickness=10, title="Depth (Z)")
+
     fig = go.Figure(data=[go.Scatter3d(
         x=points[:, 0], y=points[:, 1], z=z,
         mode="markers",
         marker=dict(
             size=1.2,
-            color=z,
-            colorscale="Viridis",
-            opacity=0.85,
-            colorbar=dict(thickness=10, title="Depth"),
+            color=color,
+            colorscale=colorscale,
+            opacity=1.0,
+            showscale=showscale,
+            colorbar=colorbar,
         ),
     )])
     fig.update_layout(
@@ -299,18 +350,23 @@ if has_scene_folders:
 
         with metric_col:
             st.markdown("**Evaluation Metrics**")
-            if eval_txt.exists():
-                st.markdown(f'<div class="metric-box">{eval_txt.read_text()}</div>', unsafe_allow_html=True)
+            # Prefer per-scene metrics if present, otherwise show global metrics.
+            metrics_src = eval_txt if eval_txt.exists() else root_eval
+            if metrics_src.exists():
+                st.markdown(f'<div class="metric-box">{metrics_src.read_text()}</div>', unsafe_allow_html=True)
             else:
-                st.info("No eval_results.txt in this folder.")
+                st.info("No eval_results.txt found (scene or root).")
 
         with cloud_col:
             st.markdown("**3D Point Cloud**")
             if ply_file:
+                st.caption(f"PLY: `{_safe_rel(ply_file, DATA_ROOT)}`")
                 with st.spinner("Loading point cloud…"):
-                    pts = read_ply_numpy(ply_file)
-                if pts is not None:
-                    st.plotly_chart(make_3d_figure(pts), use_container_width=True)
+                    parsed = read_ply_numpy(ply_file)
+                if parsed is not None:
+                    pts, cols = parsed
+                    st.caption(f"Points: {len(pts):,} (rendering a downsampled view)")
+                    st.plotly_chart(make_3d_figure(pts, cols), use_container_width=True)
                 else:
                     st.error("Could not parse the .ply file.")
             else:
@@ -341,9 +397,10 @@ else:
         if plys:
             choice = st.selectbox("Select .ply", options=[_safe_rel(p, DATA_ROOT) for p in sorted(plys)])
             chosen = next(p for p in plys if _safe_rel(p, DATA_ROOT) == choice)
-            pts = read_ply_numpy(chosen)
-            if pts is not None:
-                st.plotly_chart(make_3d_figure(pts), use_container_width=True)
+            parsed = read_ply_numpy(chosen)
+            if parsed is not None:
+                pts, cols = parsed
+                st.plotly_chart(make_3d_figure(pts, cols), use_container_width=True)
         else:
             st.info("No .ply files found.")
     with tabs[2]:
